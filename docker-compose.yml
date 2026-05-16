@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# Search Engine Aggregator Service — docker-compose
+#
+# Requirements: REQ 17.1, REQ 17.2, REQ 17.3, REQ 17.4, REQ 18.2
+# Design ref:   design.md § Docker → docker-compose.yml
+#
+# Secrets policy (REQ 18.2):
+#   This file MUST NOT contain any literal credentials, provider URLs, or
+#   other sensitive values. Every secret is sourced from the host
+#   environment via `${VAR}` interpolation. Supply them either through:
+#     1. A `.env` file in the project root (gitignored — never commit), or
+#     2. Exported shell environment variables before invoking
+#        `docker compose up`.
+#   The README documents every variable the service reads, including its
+#   Spring property key, whether it is required or optional, and the
+#   expected value format (REQ 18.2).
+#
+# Required environment variables (no compose default — must be supplied):
+#   POSTGRES_PASSWORD          Database password for the `app` and `postgres` services.
+#   PROVIDERS_JSON_BASE_URL    Base URL of the JSON content provider.
+#   PROVIDERS_XML_BASE_URL     Base URL of the XML content provider.
+#
+# Optional environment variables (compose-level defaults shown):
+#   SERVER_PORT                Host + container HTTP port. Default: 8080.
+#   POSTGRES_DB                Database name.              Default: searchengine.
+#   POSTGRES_USER              Database username.          Default: searchengine.
+# ---------------------------------------------------------------------------
+
+services:
+  # -------------------------------------------------------------------------
+  # Spring Boot application (REQ 17.1, REQ 17.4)
+  # Builds from the local Dockerfile and waits for postgres + redis to pass
+  # their healthchecks before starting (REQ 17.4).
+  # -------------------------------------------------------------------------
+  app:
+    build: .
+    image: searchengine:local
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    environment:
+      # HTTP listener (REQ 17.4)
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      # Datasource — Spring property keys so env overrides take precedence
+      # over application.yaml (REQ 18.1).
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-searchengine}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # Redis cache (REQ 17.3)
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      # Provider endpoints — never committed (REQ 18.2)
+      PROVIDERS_JSON_BASE_URL: ${PROVIDERS_JSON_BASE_URL}
+      PROVIDERS_XML_BASE_URL: ${PROVIDERS_XML_BASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------------
+  # PostgreSQL 16 (REQ 17.2)
+  # Healthcheck uses `pg_isready` so the `app` service can gate on it.
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-searchengine}
+      POSTGRES_USER: ${POSTGRES_USER:-searchengine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-searchengine}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # -------------------------------------------------------------------------
+  # Redis 7 (REQ 17.3)
+  # Healthcheck uses `redis-cli ping` so the `app` service can gate on it.
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

@@ -1,0 +1,47 @@
+# =============================================================================
+# Search Engine Aggregator Service — Local Development Profile
+# =============================================================================
+# Activate with: --spring.profiles.active=local
+# or set SPRING_PROFILES_ACTIVE=local
+#
+# Provides safe developer defaults for running locally with Docker Compose
+# dependencies (postgres, redis). No real secrets are stored here.
+# =============================================================================
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/searchengine
+    username: searchengine
+    password: searchengine
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+server:
+  port: 8080
+
+providers:
+  json:
+    base-url: http://localhost:9001/api/content
+    connect-timeout-ms: 5000
+    read-timeout-ms: 10000
+  xml:
+    base-url: http://localhost:9002/feed
+    connect-timeout-ms: 5000
+    read-timeout-ms: 10000
+
+aggregator:
+  sync:
+    enabled: true
+    fixed-delay-ms: 60000                       # 1 minute for faster local iteration
+
+cache:
+  search:
+    enabled: true
+    ttl-seconds: 60                             # shorter TTL for local dev
+
+ratelimit:
+  enabled: false                                # disabled locally for easier testing
+  requests-per-window: 100
+  window-seconds: 60

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Search Engine Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 2rem;
+            color: #1d1d1f;
+        }
+
+        h1 {
+            margin-bottom: 1rem;
+        }
+
+        .notice {
+            background: #fff8e1;
+            border: 1px solid #f0c33c;
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .notice ul {
+            margin: 0;
+            padding-left: 1.25rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #e6e6e6;
+        }
+
+        th {
+            background: #f7f7f9;
+            font-weight: 600;
+        }
+
+        td.score {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .empty {
+            margin-top: 1rem;
+            color: #5f6368;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Dashboard</h1>
+
+<!--
+    Visible "ignored" notice — REQ 10.5, 10.7. Rendered only when the
+    controller flagged the user-supplied sort or type as invalid.
+-->
+<div class="notice" th:if="${notice.hasMessages()}" role="status" data-testid="ignored-notice">
+    <strong>Some parameters were ignored:</strong>
+    <ul>
+        <li th:each="message : ${notice.messages()}" th:text="${message}">Ignored ...</li>
+    </ul>
+</div>
+
+<!--
+    Always render the table headers so REQ 10.8 can satisfy "render the
+    table headers and display a visible message" when no rows match.
+-->
+<table data-testid="dashboard-table">
+    <thead>
+    <tr>
+        <th scope="col">Title</th>
+        <th scope="col">Type</th>
+        <th scope="col">Score</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="row : ${rows}" th:unless="${empty}">
+        <td th:text="${row.title()}">Title</td>
+        <td th:text="${row.type()}">type</td>
+        <td class="score" th:text="${#numbers.formatDecimal(row.score(), 1, 2)}">0.00</td>
+    </tr>
+    </tbody>
+</table>
+
+<!-- Empty-state message — REQ 10.8 -->
+<p class="empty" th:if="${empty}" data-testid="empty-message">
+    No content items are available.
+</p>
+
+</body>
+</html>

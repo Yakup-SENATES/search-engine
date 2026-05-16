@@ -1,3 +1,77 @@
+# =============================================================================
+# Search Engine Aggregator Service — Main Configuration
+# =============================================================================
+# Environment variables take precedence over values defined here.
+# Required variables (no defaults) MUST be set before startup:
+#   DB_URL, DB_USERNAME, DB_PASSWORD, PROVIDER_JSON_URL, PROVIDER_XML_URL
+#
+# No real secrets or provider URLs are committed in this file (REQ 18.2).
+# =============================================================================
+
 spring:
   application:
     name: searchengine
+  datasource:
+    url: ${DB_URL}                              # required (REQ 18.2, 18.3)
+    username: ${DB_USERNAME}                    # required
+    password: ${DB_PASSWORD}                    # required, redacted in logs (REQ 18.5)
+  jpa:
+    hibernate:
+      ddl-auto: validate                        # Flyway owns schema
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8080}                     # REQ 17.4
+
+providers:
+  json:
+    base-url: ${PROVIDER_JSON_URL}              # required, NEVER committed (REQ 18.2)
+    connect-timeout-ms: ${PROVIDER_JSON_CONNECT_TIMEOUT_MS:5000}   # REQ 2.1
+    read-timeout-ms: ${PROVIDER_JSON_READ_TIMEOUT_MS:10000}        # REQ 2.1
+  xml:
+    base-url: ${PROVIDER_XML_URL}              # required, NEVER committed (REQ 18.2)
+    connect-timeout-ms: ${PROVIDER_XML_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${PROVIDER_XML_READ_TIMEOUT_MS:10000}
+
+aggregator:
+  sync:
+    enabled: ${SYNC_ENABLED:true}              # REQ 11.5
+    fixed-delay-ms: ${SYNC_DELAY_MS:300000}    # REQ 11.1 (5 minutes default)
+
+cache:
+  search:
+    enabled: ${CACHE_ENABLED:true}             # REQ 12.5
+    ttl-seconds: ${CACHE_TTL:300}              # REQ 12.2 (5 minutes default)
+
+ratelimit:
+  enabled: ${RATELIMIT_ENABLED:true}           # REQ 13.5
+  requests-per-window: ${RATELIMIT_RPW:100}    # REQ 13.2, 13.4
+  window-seconds: ${RATELIMIT_WINDOW:60}       # REQ 13.2, 13.4
+
+# Resilience4j configuration (REQ 21.1, 21.2)
+resilience4j:
+  timelimiter:
+    instances:
+      jsonProvider:
+        timeout-duration: 10s                  # REQ 21.1
+        cancel-running-future: true
+      xmlProvider:
+        timeout-duration: 10s                  # REQ 21.1
+        cancel-running-future: true
+  retry:
+    instances:
+      jsonProvider:
+        max-attempts: 3                        # REQ 21.2
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2.0
+      xmlProvider:
+        max-attempts: 3                        # REQ 21.2
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2.0

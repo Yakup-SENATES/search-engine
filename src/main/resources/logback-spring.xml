@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Structured logging configuration for the Search Engine Aggregator Service.
+
+    Implements REQ 16:
+      * 16.1 - JSON-formatted log entries with `timestamp`, `level`, `logger`,
+               `message`, and `requestId` (MDC) fields.
+      * 16.3 - Provider-fetch logs include `provider`, `elapsedMs` (and `count` /
+               `outcome`) emitted as first-class JSON keys.
+      * 16.4 - Error / warn logs from Provider_Adapter, Normalizer, Scoring_Engine,
+               and Content_Repository include `field`, `externalId`, and `provider`
+               whenever the source has them.
+
+    Structured fields are emitted as JSON keys by `net.logstash.logback.encoder.LogstashEncoder`.
+    Application code should attach those fields using
+    `net.logstash.logback.argument.StructuredArguments.kv("name", value)` (statically
+    imported as `kv(...)`), e.g.:
+
+        log.info("provider fetch", kv("provider", provider.name()),
+                                   kv("count", raw.size()),
+                                   kv("elapsedMs", elapsedMs),
+                                   kv("outcome", raw.isEmpty() ? "EMPTY" : "OK"));
+
+    Each `kv(...)` argument is rendered as a top-level JSON key by `LogstashEncoder`,
+    so downstream log shippers can filter on `provider`, `externalId`, `field`,
+    `elapsedMs`, and `outcome` without parsing the human-readable message.
+
+    The MDC key `requestId` is populated by `RequestIdFilter` (see
+    `infrastructure/logging/RequestIdFilter.java`, REQ 16.2) and propagated as a
+    JSON field on every log entry within the request scope.
+-->
+<configuration>
+
+    <!-- Allow Spring profile to override the root log level via application.yaml
+         (`logging.level.root`) without requiring a Spring-specific include. -->
+    <springProperty scope="context" name="ROOT_LOG_LEVEL" source="logging.level.root" defaultValue="INFO"/>
+
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- Propagate requestId from SLF4J MDC into the JSON payload (REQ 16.1, 16.2). -->
+            <includeMdcKeyName>requestId</includeMdcKeyName>
+            <!--
+                Default LogstashEncoder fields already include:
+                  timestamp, @version, message, logger_name, thread_name, level, level_value
+                Structured arguments supplied via `StructuredArguments.kv(name, value)` from
+                application code (e.g. `provider`, `externalId`, `field`, `elapsedMs`, `outcome`)
+                are merged into the JSON object as additional keys.
+            -->
+        </encoder>
+    </appender>
+
+    <root level="${ROOT_LOG_LEVEL}">
+        <appender-ref ref="JSON_CONSOLE"/>
+    </root>
+
+</configuration>
