@@ -34,3 +34,7 @@ build/
 
 ### jqwik (property-based testing) ###
 .jqwik-database
+
+### Local secrets ###
+.env
+.env.local
