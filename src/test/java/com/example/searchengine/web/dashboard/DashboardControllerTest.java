@@ -276,4 +276,149 @@ class DashboardControllerTest {
         assertThat(rendered.get(1).score()).isEqualTo(1.0);
         assertThat(model.getAttribute("empty")).isEqualTo(false);
     }
+
+    // ------------------------------------------------------------------
+    // REQ 3.1, 3.2, 3.6, 9.2 — model exposes activeSort / activeType so
+    // the template can pre-select the corresponding form options and keep
+    // the Score header link in sync with the user's effective filters.
+    // ------------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Active filter model attributes (REQ 3.1, 3.2, 3.6, 9.2)")
+    class ActiveFilterAttributes {
+
+        private String activeSort(Model model) {
+            Object value = model.getAttribute("activeSort");
+            assertThat(value)
+                    .as("activeSort must always be present on the model")
+                    .isNotNull()
+                    .isInstanceOf(String.class);
+            return (String) value;
+        }
+
+        private String activeType(Model model) {
+            // activeType is allowed to be null (== "no filter"). Spring's
+            // ConcurrentModel#addAttribute(name, null) drops the key, so we
+            // read the value directly rather than asserting key presence.
+            Object value = model.getAttribute("activeType");
+            assertThat(value)
+                    .as("activeType must be a String or null")
+                    .satisfiesAnyOf(
+                            v -> assertThat(v).isNull(),
+                            v -> assertThat(v).isInstanceOf(String.class)
+                    );
+            return (String) value;
+        }
+
+        @Test
+        @DisplayName("Valid lowercase sort=popularity and type=text expose those values verbatim")
+        void validLowercase_exposedVerbatim() {
+            when(searchService.listTop(eq("popularity"), eq("text"), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("popularity", "text", model);
+
+            assertThat(activeSort(model)).isEqualTo("popularity");
+            assertThat(activeType(model)).isEqualTo("text");
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Mixed-case sort=ScOrE is lowercased to 'score' on the model")
+        void mixedCaseSort_lowercased() {
+            when(searchService.listTop(eq("score"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("ScOrE", null, model);
+
+            assertThat(activeSort(model)).isEqualTo("score");
+            assertThat(activeType(model)).isNull();
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Whitespace-padded sort='  relevance  ' is trimmed to 'relevance' on the model")
+        void whitespacePaddedSort_trimmed() {
+            when(searchService.listTop(eq("relevance"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("  relevance  ", null, model);
+
+            assertThat(activeSort(model)).isEqualTo("relevance");
+            assertThat(activeType(model)).isNull();
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Invalid sort=nope falls back to activeSort='score' and notice mentions 'sort'")
+        void invalidSort_activeFallsBackAndNoticeMentionsSort() {
+            when(searchService.listTop(eq("score"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("nope", null, model);
+
+            assertThat(activeSort(model)).isEqualTo("score");
+            assertThat(activeType(model)).isNull();
+            IgnoredParamNotice n = notice(model);
+            assertThat(n.hasMessages()).isTrue();
+            assertThat(n.messages())
+                    .anySatisfy(msg -> assertThat(msg).containsIgnoringCase("sort"));
+        }
+
+        @Test
+        @DisplayName("Invalid type=alsonope yields activeType=null and notice mentions 'type'")
+        void invalidType_activeIsNullAndNoticeMentionsType() {
+            when(searchService.listTop(eq("score"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard(null, "alsonope", model);
+
+            assertThat(activeSort(model)).isEqualTo("score");
+            assertThat(activeType(model)).isNull();
+            IgnoredParamNotice n = notice(model);
+            assertThat(n.hasMessages()).isTrue();
+            assertThat(n.messages())
+                    .anySatisfy(msg -> assertThat(msg).containsIgnoringCase("type"));
+        }
+
+        @Test
+        @DisplayName("Null sort and null type yield activeSort='score', activeType=null, no notice")
+        void nullInputs_defaultsAndNoNotice() {
+            when(searchService.listTop(eq("score"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard(null, null, model);
+
+            assertThat(activeSort(model)).isEqualTo("score");
+            assertThat(activeType(model)).isNull();
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Blank sort and blank type yield activeSort='score', activeType=null, no notice")
+        void blankInputs_defaultsAndNoNotice() {
+            when(searchService.listTop(eq("score"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("   ", "  ", model);
+
+            assertThat(activeSort(model)).isEqualTo("score");
+            assertThat(activeType(model)).isNull();
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+
+        @Test
+        @DisplayName("sort=relevance is forwarded as listTop(\"relevance\", null, 20)")
+        void relevanceSort_forwardedToService() {
+            when(searchService.listTop(eq("relevance"), eq(null), eq(DashboardController.DEFAULT_LIMIT)))
+                    .thenReturn(emptyResult());
+
+            controller.dashboard("relevance", null, model);
+
+            verify(searchService).listTop("relevance", null, DashboardController.DEFAULT_LIMIT);
+            assertThat(activeSort(model)).isEqualTo("relevance");
+            assertThat(activeType(model)).isNull();
+            assertThat(notice(model).hasMessages()).isFalse();
+        }
+    }
 }

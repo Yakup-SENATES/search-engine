@@ -59,6 +59,8 @@ public class DashboardController {
         model.addAttribute("rows", rows);
         model.addAttribute("notice", noticeBuilder.build());
         model.addAttribute("empty", rows.isEmpty()); // REQ 10.8
+        model.addAttribute("activeSort", effectiveSort);
+        model.addAttribute("activeType", effectiveType);
         return "dashboard";
     }
 
