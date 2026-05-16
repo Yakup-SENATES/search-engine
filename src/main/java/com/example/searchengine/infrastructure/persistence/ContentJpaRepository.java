@@ -88,15 +88,18 @@ public interface ContentJpaRepository extends JpaRepository<ContentEntity, UUID>
      * @return list of matching content entities
      */
     @Query(value = """
-        SELECT c.*, ts_rank_cd(to_tsvector('simple', c.title || ' ' || coalesce(c.description, '')),
-                               plainto_tsquery('simple', :q)) AS rel
+        SELECT c.*
           FROM contents c
          WHERE to_tsvector('simple', c.title || ' ' || coalesce(c.description, '')) @@ plainto_tsquery('simple', :q)
            AND (:type IS NULL OR c.type = :type)
          ORDER BY
            CASE WHEN :sort = 'SCORE'      THEN c.final_score      END DESC,
            CASE WHEN :sort = 'POPULARITY' THEN c.popularity_score END DESC,
-           CASE WHEN :sort = 'RELEVANCE'  THEN rel                END DESC,
+           CASE WHEN :sort = 'RELEVANCE'
+                THEN ts_rank_cd(
+                       to_tsvector('simple', c.title || ' ' || coalesce(c.description, '')),
+                       plainto_tsquery('simple', :q))
+           END DESC,
            c.id ASC
          OFFSET :offset LIMIT :limit
         """, nativeQuery = true)

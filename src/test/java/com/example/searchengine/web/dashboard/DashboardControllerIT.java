@@ -372,12 +372,326 @@ class DashboardControllerIT {
         assertThat(body).doesNotContain("Title-");
     }
 
+    // =====================================================================
+    // dashboard-ux-enhancements — HTML-level assertions (Task 4.1)
+    //
+    // Validates Requirements 1.6, 3.3, 3.4, 3.5, 4.1, 5.1, 5.2, 5.3, 6.5,
+    // 6.6, 7.1, 7.2, 7.3, 7.4, 8.1, 8.2, 8.3, 9.3, 9.4, 9.5, 10.4, 11.2,
+    // 11.3, 11.4.
+    // =====================================================================
+
+    // ---------------------------------------------------------------------
+    // REQ 3.3, 11.2 — sort <select> renders the active option as `selected`
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("GET /dashboard?sort=v marks the matching <option> with the selected attribute (REQ 3.3, 11.2)")
+    void sortSelectMarksActiveOptionAsSelected() {
+        seedFixture();
+
+        for (String v : List.of("score", "popularity", "relevance")) {
+            ResponseEntity<String> response = getDashboard("/dashboard?sort=" + v);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            String body = response.getBody();
+            assertThat(body).isNotNull();
+            assertThat(body)
+                    .as("sort=%s should render <option value=\"%s\" ... selected ...>", v, v)
+                    .containsPattern("<option value=\"" + v + "\"[^>]*selected[^>]*>");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 3.4 — type <select> renders the active option as `selected`
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("GET /dashboard?type=v marks the matching <option> with the selected attribute (REQ 3.4)")
+    void typeSelectMarksActiveOptionAsSelected() {
+        seedFixture();
+
+        for (String v : List.of("text", "video")) {
+            ResponseEntity<String> response = getDashboard("/dashboard?type=" + v);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            String body = response.getBody();
+            assertThat(body).isNotNull();
+            assertThat(body)
+                    .as("type=%s should render <option value=\"%s\" ... selected ...>", v, v)
+                    .containsPattern("<option value=\"" + v + "\"[^>]*selected[^>]*>");
+        }
+    }
+
+    @Test
+    @DisplayName("GET /dashboard with no ?type marks the All <option> with the selected attribute (REQ 3.4)")
+    void typeSelectMarksAllOptionAsSelectedWhenNoFilter() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body)
+                .as("no-type request must mark <option value=\"\">All</option> as selected")
+                .containsPattern("<option value=\"\"[^>]*selected[^>]*>All</option>");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 7.1, 7.2, 7.4, 11.3 — result-count summary contains row count + sort
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Result-count summary contains the rendered row count and the active sort (REQ 7.1, 7.2, 11.3)")
+    void resultCountSummaryContainsRowCountAndActiveSort() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        assertThat(body).contains("data-testid=\"result-count\"");
+
+        // The summary mixes literal text with <span> elements; flatten by
+        // stripping tags and collapsing whitespace before checking the text.
+        String flat = flattenText(body);
+        assertThat(flat)
+                .as("summary should report 'Showing 20' against the 22-row fixture (capped to DEFAULT_LIMIT=20)")
+                .contains("Showing 20")
+                .as("summary should report the active sort")
+                .contains("sorted by score");
+    }
+
+    @Test
+    @DisplayName("Result-count summary on an empty fixture renders 'Showing 0 ... sorted by score' (REQ 7.4)")
+    void resultCountSummaryOnEmptyFixture() {
+        // @BeforeEach already cleared the database; intentionally seed nothing.
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        assertThat(body).contains("data-testid=\"result-count\"");
+
+        String flat = flattenText(body);
+        assertThat(flat).contains("Showing 0");
+        assertThat(flat).contains("sorted by score");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 7.3 — result-count summary includes the active type when set
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Result-count summary includes the active type word when ?type=text (REQ 7.3)")
+    void resultCountSummaryIncludesActiveTypeWhenSet() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard?type=text");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        String flat = flattenText(body);
+        assertThat(flat).contains("Showing");
+        assertThat(flat).contains("text results sorted by score");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 1.6, 11.4 — Score header link href (with and without type filter)
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Score header link href is /dashboard?sort=score with no type filter (REQ 1.6, 11.4)")
+    void scoreHeaderLinkHrefWithoutTypeFilter() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        // The closing quote pins the URL — guards against accidentally
+        // matching `/dashboard?sort=score&amp;type=...` here.
+        assertThat(body).contains("<a href=\"/dashboard?sort=score\"");
+    }
+
+    @Test
+    @DisplayName("Score header link href is /dashboard?sort=score&amp;type=text with ?type=text (REQ 1.6)")
+    void scoreHeaderLinkHrefWithTypeText() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard?type=text");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        // Thymeleaf HTML-escapes the ampersand inside attribute values.
+        assertThat(body).contains("/dashboard?sort=score&amp;type=text");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 3.5 — Active-sort indicator on the Score column header
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Score <th> carries 'active-sort' class and a ▼ glyph when sort=score (REQ 3.5)")
+    void scoreHeaderHasActiveSortIndicatorWhenSortIsScore() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard?sort=score");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        // The Score header is the only <th> with class score-col; classappend
+        // adds " active-sort" so the rendered class attribute is exactly
+        // "score-col active-sort".
+        assertThat(body)
+                .as("Score <th> must carry both 'score-col' and 'active-sort' CSS classes")
+                .contains("class=\"score-col active-sort\"");
+        assertThat(body)
+                .as("Active-sort indicator must include a ▼ glyph")
+                .contains("▼");
+    }
+
+    @Test
+    @DisplayName("Score <th> does NOT carry 'active-sort' class when sort=popularity (REQ 3.5)")
+    void scoreHeaderHasNoActiveSortClassWhenSortIsNotScore() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard?sort=popularity");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        // The token "active-sort" still appears in the inline <style> block
+        // (`th.active-sort a { ... }`), so the negative assertion has to be
+        // scoped to the class-attribute combination — when sort != score the
+        // Score header's class attribute is just "score-col".
+        assertThat(body)
+                .as("Score <th> class must remain 'score-col' alone when sort != score")
+                .doesNotContain("score-col active-sort");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 5.1, 5.2, 5.3 — Type badges render with correct CSS classes
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Body contains type-badge--text and type-badge--video CSS classes against the mixed-type fixture (REQ 5.1–5.3)")
+    void typeBadgesRenderWithCorrectCssClasses() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        assertThat(body)
+                .contains("class=\"type-badge type-badge--text\"")
+                .contains("class=\"type-badge type-badge--video\"");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 4.1 — score formatting (regression guard)
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Score column renders one decimal place (100.0) and never two (100.00) (REQ 4.1)")
+    void scoreFormattingUsesOneDecimal() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        // Rows 1 and 2 in the fixture share final_score = 100.0; the new
+        // template formats with #numbers.formatDecimal(score, 1, 1) so the
+        // rendered text is "100.0" — never "100.00".
+        assertThat(body).contains("100.0");
+        assertThat(body).doesNotContain("100.00");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 8.1, 8.2, 8.3 — viewport meta + responsive media query
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Body contains viewport meta tag and the @media (max-width: 600px) rule (REQ 8.1, 8.2, 8.3)")
+    void bodyContainsViewportMetaAndMediaQuery() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        assertThat(body)
+                .contains("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+                .contains("@media (max-width: 600px)");
+    }
+
+    // ---------------------------------------------------------------------
+    // REQ 9.4, 9.5, 10.4 — no client-side script, no pagination, no search box
+    // ---------------------------------------------------------------------
+
+    @Test
+    @DisplayName("Body contains no <script>, no <input>, no name=\"page\" and no name=\"q\" (REQ 9.4, 9.5, 10.4)")
+    void bodyHasNoScriptOrPaginationOrSearchBox() {
+        seedFixture();
+
+        ResponseEntity<String> response = getDashboard("/dashboard");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String body = response.getBody();
+        assertThat(body).isNotNull();
+
+        assertThat(body)
+                .as("dashboard must remain 100% server-rendered, no <script> tags")
+                .doesNotContain("<script");
+        assertThat(body)
+                .as("dashboard must not render any <input> element (no search box, no hidden inputs)")
+                .doesNotContain("<input");
+        assertThat(body)
+                .as("dashboard must not introduce pagination controls in this feature")
+                .doesNotContain("name=\"page\"");
+        assertThat(body)
+                .as("dashboard must not introduce a free-text search box in this feature")
+                .doesNotContain("name=\"q\"");
+    }
+
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 
     private ResponseEntity<String> getDashboard(String path) {
         return restTemplate.getForEntity("http://localhost:" + port + path, String.class);
+    }
+
+    /**
+     * Flattens an HTML fragment by stripping every tag and collapsing all
+     * whitespace runs to a single space. This is enough for assertions on
+     * visible textual content (e.g. {@code "Showing 20 results sorted by score"})
+     * that would otherwise be split across nested {@code <span>} elements and
+     * Thymeleaf-preserved newlines in the source template.
+     */
+    private static String flattenText(String html) {
+        String noTags = html.replaceAll("<[^>]+>", " ");
+        return noTags.replaceAll("\\s+", " ").trim();
     }
 
     /**

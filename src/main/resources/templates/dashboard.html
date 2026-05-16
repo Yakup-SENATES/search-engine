@@ -2,16 +2,36 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Search Engine Dashboard</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 2rem;
             color: #1d1d1f;
+            margin: 0;
         }
 
-        h1 {
-            margin-bottom: 1rem;
+        .page {
+            padding: 2rem;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: baseline;
+            gap: 1rem;
+            padding: 1rem 2rem;
+            background: #0f172a;
+            color: #ffffff;
+        }
+
+        .topbar__brand {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .topbar__title {
+            font-weight: 400;
+            opacity: 0.85;
         }
 
         .notice {
@@ -27,25 +47,108 @@
             padding-left: 1.25rem;
         }
 
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: end;
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+
+        .controls__field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .controls__label {
+            font-size: 0.85rem;
+            color: #5f6368;
+            margin-bottom: 0.25rem;
+        }
+
+        .controls__submit {
+            padding: 0.4rem 0.9rem;
+            background: #1d4ed8;
+            color: #ffffff;
+            border: 0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .summary {
+            color: #5f6368;
+            margin: 0.5rem 0 1rem 0;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
         }
 
-        th, td {
+        thead th {
+            position: sticky;
+            top: 0;
+            background: #f7f7f9;
+            font-weight: 600;
             text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #e6e6e6;
+            z-index: 1;
+        }
+
+        tbody td {
             padding: 0.5rem 0.75rem;
             border-bottom: 1px solid #e6e6e6;
         }
 
-        th {
-            background: #f7f7f9;
-            font-weight: 600;
+        tbody tr:nth-child(even) {
+            background: #fafafa;
         }
 
-        td.score {
+        tbody tr:hover {
+            background: #eef2ff;
+        }
+
+        td.score, th.score-col {
             text-align: right;
             font-variant-numeric: tabular-nums;
+        }
+
+        th.score-col a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        th.score-col a:hover {
+            text-decoration: underline;
+        }
+
+        th.active-sort a {
+            color: #1d4ed8;
+            font-weight: 700;
+        }
+
+        .type-badge {
+            display: inline-block;
+            padding: 0.1rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #ffffff;
+            text-transform: lowercase;
+            letter-spacing: 0.02em;
+        }
+
+        .type-badge--text {
+            background: #1d4ed8;
+        }
+
+        .type-badge--video {
+            background: #6d28d9;
         }
 
         .empty {
@@ -53,48 +156,110 @@
             color: #5f6368;
             font-style: italic;
         }
+
+        @media (max-width: 600px) {
+            .page {
+                padding: 1rem;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .controls__field, .controls__submit {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
 
-<h1>Dashboard</h1>
+<header class="topbar">
+    <span class="topbar__brand">Search Engine</span>
+    <span class="topbar__title">Dashboard</span>
+</header>
 
-<!--
-    Visible "ignored" notice — REQ 10.5, 10.7. Rendered only when the
-    controller flagged the user-supplied sort or type as invalid.
--->
-<div class="notice" th:if="${notice.hasMessages()}" role="status" data-testid="ignored-notice">
-    <strong>Some parameters were ignored:</strong>
-    <ul>
-        <li th:each="message : ${notice.messages()}" th:text="${message}">Ignored ...</li>
-    </ul>
-</div>
+<main class="page">
 
-<!--
-    Always render the table headers so REQ 10.8 can satisfy "render the
-    table headers and display a visible message" when no rows match.
--->
-<table data-testid="dashboard-table">
-    <thead>
-    <tr>
-        <th scope="col">Title</th>
-        <th scope="col">Type</th>
-        <th scope="col">Score</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr th:each="row : ${rows}" th:unless="${empty}">
-        <td th:text="${row.title()}">Title</td>
-        <td th:text="${row.type()}">type</td>
-        <td class="score" th:text="${#numbers.formatDecimal(row.score(), 1, 2)}">0.00</td>
-    </tr>
-    </tbody>
-</table>
+    <!--
+        Visible "ignored" notice — REQ 10.5, 10.7. Rendered only when the
+        controller flagged the user-supplied sort or type as invalid.
+    -->
+    <div class="notice" th:if="${notice.hasMessages()}" role="status" data-testid="ignored-notice">
+        <strong>Some parameters were ignored:</strong>
+        <ul>
+            <li th:each="message : ${notice.messages()}" th:text="${message}">Ignored ...</li>
+        </ul>
+    </div>
 
-<!-- Empty-state message — REQ 10.8 -->
-<p class="empty" th:if="${empty}" data-testid="empty-message">
-    No content items are available.
-</p>
+    <form class="controls" method="get" action="/dashboard">
+        <label class="controls__field">
+            <span class="controls__label">Sort by</span>
+            <select name="sort">
+                <option value="score"      th:selected="${activeSort == 'score'}">Score</option>
+                <option value="popularity" th:selected="${activeSort == 'popularity'}">Popularity</option>
+                <option value="relevance"  th:selected="${activeSort == 'relevance'}">Relevance</option>
+            </select>
+        </label>
+        <label class="controls__field">
+            <span class="controls__label">Type</span>
+            <select name="type">
+                <option value=""      th:selected="${activeType == null}">All</option>
+                <option value="text"  th:selected="${activeType == 'text'}">Text</option>
+                <option value="video" th:selected="${activeType == 'video'}">Video</option>
+            </select>
+        </label>
+        <button class="controls__submit" type="submit">Apply</button>
+    </form>
+
+    <p class="summary" data-testid="result-count">
+        Showing
+        <span th:text="${#lists.size(rows)}">0</span>
+        <span th:if="${activeType != null}" th:text="${activeType + ' '}"></span>results
+        sorted by
+        <span th:text="${activeSort}">score</span>
+    </p>
+
+    <!--
+        Always render the table headers so REQ 10.8 can satisfy "render the
+        table headers and display a visible message" when no rows match.
+    -->
+    <div class="table-wrap">
+        <table data-testid="dashboard-table">
+            <thead>
+            <tr>
+                <th scope="col">Title</th>
+                <th scope="col">Type</th>
+                <th scope="col"
+                    th:class="${activeSort == 'score'} ? 'score-col active-sort' : 'score-col'">
+                    <a th:href="${activeType != null}
+                                ? @{/dashboard(sort='score', type=${activeType})}
+                                : @{/dashboard(sort='score')}">
+                        Score<span th:if="${activeSort == 'score'}" aria-hidden="true"> ▼</span>
+                    </a>
+                </th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="row : ${rows}" th:unless="${empty}">
+                <td th:text="${row.title()}">Title</td>
+                <td>
+                    <span th:class="'type-badge type-badge--' + ${row.type()}"
+                          th:text="${row.type()}">type</span>
+                </td>
+                <td class="score" th:text="${#numbers.formatDecimal(row.score(), 1, 1)}">0.0</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Empty-state message — REQ 10.8 -->
+    <p class="empty" th:if="${empty}" data-testid="empty-message">
+        No content items are available.
+    </p>
+
+</main>
 
 </body>
 </html>
