@@ -45,3 +45,11 @@ ratelimit:
   enabled: false                                # disabled locally for easier testing
   requests-per-window: 100
   window-seconds: 60
+
+# Mirror the production default so /actuator/prometheus is scrapeable
+# from a localhost dev run as well.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
