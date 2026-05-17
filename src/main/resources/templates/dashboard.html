@@ -95,7 +95,7 @@
             background: #f7f7f9;
             font-weight: 600;
             text-align: left;
-            padding: 0.5rem 0.75rem;
+            padding: 0;
             border-bottom: 1px solid #e6e6e6;
             z-index: 1;
         }
@@ -118,19 +118,77 @@
             font-variant-numeric: tabular-nums;
         }
 
-        th.score-col a {
+        /* ---- sortable headers --------------------------------------------- */
+
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th.sortable .sort-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            background: transparent;
+            border: 0;
+            font: inherit;
             color: inherit;
-            text-decoration: none;
+            text-align: inherit;
+            cursor: pointer;
         }
 
-        th.score-col a:hover {
-            text-decoration: underline;
+        th.sortable.score-col .sort-btn {
+            justify-content: flex-end;
+            flex-direction: row-reverse; /* arrows on the left of the label for right-aligned column */
         }
 
-        th.active-sort a {
+        th.sortable .sort-btn:hover {
             color: #1d4ed8;
-            font-weight: 700;
         }
+
+        th.sortable .sort-btn:focus-visible {
+            outline: 2px solid #1d4ed8;
+            outline-offset: -2px;
+        }
+
+        /* Stacked up + down triangle indicator. Both arrows are dim by
+           default; the active direction lights up to #1d4ed8. */
+        .sort-icon {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 0.7rem;
+            line-height: 0.55;
+            font-size: 0.6rem;
+            color: #b0b3b8;
+            flex: none;
+        }
+
+        .sort-icon::before {
+            content: "▲";
+        }
+
+        .sort-icon::after {
+            content: "▼";
+        }
+
+        th.sortable[aria-sort="ascending"] .sort-icon::before {
+            color: #1d4ed8;
+        }
+
+        th.sortable[aria-sort="descending"] .sort-icon::after {
+            color: #1d4ed8;
+        }
+
+        th.sortable[aria-sort="ascending"],
+        th.sortable[aria-sort="descending"] {
+            color: #1d4ed8;
+        }
+
+        /* -------------------------------------------------------------------- */
 
         .type-badge {
             display: inline-block;
@@ -195,7 +253,7 @@
 
     <form class="controls" method="get" action="/dashboard">
         <label class="controls__field">
-            <span class="controls__label">Sort by</span>
+            <span class="controls__label">Top 20 by</span>
             <select name="sort">
                 <option value="score"      th:selected="${activeSort == 'score'}">Score</option>
                 <option value="popularity" th:selected="${activeSort == 'popularity'}">Popularity</option>
@@ -219,36 +277,65 @@
         <span th:if="${activeType != null}" th:text="${activeType + ' '}"></span>results
         sorted by
         <span th:text="${activeSort}">score</span>
+        <span class="summary__hint"> &middot; click any column header to re-sort</span>
     </p>
 
     <!--
         Always render the table headers so REQ 10.8 can satisfy "render the
         table headers and display a visible message" when no rows match.
+
+        Each header is a sortable column with up/down arrow indicators.
+        Sorting is performed client-side on the already-loaded rows, so a
+        click does not trigger a server round-trip. The Score column starts
+        in the "descending" state to match the server-side default ordering.
     -->
     <div class="table-wrap">
         <table data-testid="dashboard-table">
             <thead>
             <tr>
-                <th scope="col">Title</th>
-                <th scope="col">Type</th>
                 <th scope="col"
-                    th:class="${activeSort == 'score'} ? 'score-col active-sort' : 'score-col'">
-                    <a th:href="${activeType != null}
-                                ? @{/dashboard(sort='score', type=${activeType})}
-                                : @{/dashboard(sort='score')}">
-                        Score<span th:if="${activeSort == 'score'}" aria-hidden="true"> ▼</span>
-                    </a>
+                    class="sortable"
+                    data-sort-key="title"
+                    data-sort-type="text"
+                    aria-sort="none">
+                    <button type="button" class="sort-btn" aria-label="Sort by title">
+                        <span>Title</span>
+                        <span class="sort-icon" aria-hidden="true"></span>
+                    </button>
+                </th>
+                <th scope="col"
+                    class="sortable"
+                    data-sort-key="type"
+                    data-sort-type="text"
+                    aria-sort="none">
+                    <button type="button" class="sort-btn" aria-label="Sort by type">
+                        <span>Type</span>
+                        <span class="sort-icon" aria-hidden="true"></span>
+                    </button>
+                </th>
+                <th scope="col"
+                    class="sortable score-col"
+                    data-sort-key="score"
+                    data-sort-type="number"
+                    aria-sort="descending">
+                    <button type="button" class="sort-btn" aria-label="Sort by score">
+                        <span>Score</span>
+                        <span class="sort-icon" aria-hidden="true"></span>
+                    </button>
                 </th>
             </tr>
             </thead>
             <tbody>
             <tr th:each="row : ${rows}" th:unless="${empty}">
-                <td th:text="${row.title()}">Title</td>
-                <td>
+                <td th:text="${row.title()}"
+                    th:attr="data-value=${row.title()}">Title</td>
+                <td th:attr="data-value=${row.type()}">
                     <span th:class="'type-badge type-badge--' + ${row.type()}"
                           th:text="${row.type()}">type</span>
                 </td>
-                <td class="score" th:text="${#numbers.formatDecimal(row.score(), 1, 1)}">0.0</td>
+                <td class="score"
+                    th:attr="data-value=${row.score()}"
+                    th:text="${#numbers.formatDecimal(row.score(), 1, 1)}">0.0</td>
             </tr>
             </tbody>
         </table>
@@ -260,6 +347,86 @@
     </p>
 
 </main>
+
+<script>
+    // ---------------------------------------------------------------------
+    // Client-side column sorting for the dashboard table.
+    //
+    // - Each sortable <th> carries data-sort-key (cell column id) and
+    //   data-sort-type ("text" or "number").
+    // - Each <td> carries a data-value attribute holding the raw value to
+    //   compare against (numeric for score, plain text otherwise) so we
+    //   never depend on how the cell was rendered.
+    // - Clicking a header toggles its direction (asc <-> desc) when it is
+    //   already active, otherwise resets to a sensible default for that
+    //   column type (numbers default to descending; text to ascending).
+    // - The active column reflects its state via aria-sort so screen
+    //   readers and the CSS arrow indicator stay in sync.
+    // ---------------------------------------------------------------------
+    (function () {
+        const table = document.querySelector('[data-testid="dashboard-table"]');
+        if (!table) return;
+
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+
+        const headers = Array.from(table.querySelectorAll('th.sortable'));
+        if (headers.length === 0) return;
+
+        function sortRows(colIndex, type, direction) {
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const factor = direction === 'asc' ? 1 : -1;
+
+            rows.sort(function (a, b) {
+                const aCell = a.children[colIndex];
+                const bCell = b.children[colIndex];
+                const rawA = aCell ? (aCell.dataset.value ?? aCell.textContent ?? '') : '';
+                const rawB = bCell ? (bCell.dataset.value ?? bCell.textContent ?? '') : '';
+
+                if (type === 'number') {
+                    const numA = parseFloat(rawA);
+                    const numB = parseFloat(rawB);
+                    const safeA = isNaN(numA) ? 0 : numA;
+                    const safeB = isNaN(numB) ? 0 : numB;
+                    return (safeA - safeB) * factor;
+                }
+                return String(rawA).localeCompare(String(rawB), undefined, { sensitivity: 'base' }) * factor;
+            });
+
+            const fragment = document.createDocumentFragment();
+            rows.forEach(function (row) { fragment.appendChild(row); });
+            tbody.appendChild(fragment);
+        }
+
+        function handleHeaderClick(header) {
+            const colIndex = headers.indexOf(header);
+            const type = header.dataset.sortType || 'text';
+            const current = header.getAttribute('aria-sort');
+
+            let nextDir;
+            if (current === 'ascending') {
+                nextDir = 'desc';
+            } else if (current === 'descending') {
+                nextDir = 'asc';
+            } else {
+                nextDir = type === 'number' ? 'desc' : 'asc';
+            }
+
+            // Reset all headers, then mark the clicked one.
+            headers.forEach(function (h) {
+                h.setAttribute('aria-sort', 'none');
+            });
+            header.setAttribute('aria-sort', nextDir === 'asc' ? 'ascending' : 'descending');
+
+            sortRows(colIndex, type, nextDir);
+        }
+
+        headers.forEach(function (header) {
+            const button = header.querySelector('.sort-btn') || header;
+            button.addEventListener('click', function () { handleHeaderClick(header); });
+        });
+    })();
+</script>
 
 </body>
 </html>

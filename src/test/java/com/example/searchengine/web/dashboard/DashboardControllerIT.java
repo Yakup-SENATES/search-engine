@@ -118,11 +118,16 @@ class DashboardControllerIT {
         String body = response.getBody();
         assertThat(body).isNotNull();
 
-        // REQ 10.2: exactly the three columns Title | Type | Score
+        // REQ 10.2: exactly the three columns Title | Type | Score. The
+        // headers are now interactive sortable buttons; assert the visible
+        // label text is present rather than pinning the exact <th> markup.
         assertThat(body)
-                .contains("<th scope=\"col\">Title</th>")
-                .contains("<th scope=\"col\">Type</th>")
-                .contains("<th scope=\"col\">Score</th>");
+                .contains("data-sort-key=\"title\"")
+                .contains("data-sort-key=\"type\"")
+                .contains("data-sort-key=\"score\"")
+                .contains(">Title<")
+                .contains(">Type<")
+                .contains(">Score<");
 
         // REQ 10.3: top 20 rows present (Title-01..Title-20); rows 21-22 absent.
         for (int i = 1; i <= 20; i++) {
@@ -364,9 +369,12 @@ class DashboardControllerIT {
         // REQ 10.2: column headers must remain rendered even when the table
         // contains no data rows.
         assertThat(body)
-                .contains("<th scope=\"col\">Title</th>")
-                .contains("<th scope=\"col\">Type</th>")
-                .contains("<th scope=\"col\">Score</th>");
+                .contains("data-sort-key=\"title\"")
+                .contains("data-sort-key=\"type\"")
+                .contains("data-sort-key=\"score\"")
+                .contains(">Title<")
+                .contains(">Type<")
+                .contains(">Score<");
 
         // No fixture titles should be present.
         assertThat(body).doesNotContain("Title-");
@@ -503,12 +511,12 @@ class DashboardControllerIT {
     }
 
     // ---------------------------------------------------------------------
-    // REQ 1.6, 11.4 — Score header link href (with and without type filter)
+    // Sortable column headers (each column is interactive client-side)
     // ---------------------------------------------------------------------
 
     @Test
-    @DisplayName("Score header link href is /dashboard?sort=score with no type filter (REQ 1.6, 11.4)")
-    void scoreHeaderLinkHrefWithoutTypeFilter() {
+    @DisplayName("All three column headers are rendered as sortable controls with aria-sort attributes")
+    void allColumnHeadersAreSortable() {
         seedFixture();
 
         ResponseEntity<String> response = getDashboard("/dashboard");
@@ -517,70 +525,44 @@ class DashboardControllerIT {
         String body = response.getBody();
         assertThat(body).isNotNull();
 
-        // The closing quote pins the URL — guards against accidentally
-        // matching `/dashboard?sort=score&amp;type=...` here.
-        assertThat(body).contains("<a href=\"/dashboard?sort=score\"");
+        // Each <th> declares its column key and an aria-sort attribute so
+        // the client-side sorter can wire up the up/down arrow toggles.
+        assertThat(body)
+                .contains("data-sort-key=\"title\"")
+                .contains("data-sort-key=\"type\"")
+                .contains("data-sort-key=\"score\"");
+
+        // Score column starts in descending order to match the server-side
+        // default ordering (final_score DESC). Title and Type start unsorted.
+        assertThat(body)
+                .as("Score header must start with aria-sort=\"descending\"")
+                .containsPattern("data-sort-key=\"score\"[^>]*aria-sort=\"descending\"");
+        assertThat(body)
+                .as("Title header must start with aria-sort=\"none\"")
+                .containsPattern("data-sort-key=\"title\"[^>]*aria-sort=\"none\"");
+        assertThat(body)
+                .as("Type header must start with aria-sort=\"none\"")
+                .containsPattern("data-sort-key=\"type\"[^>]*aria-sort=\"none\"");
     }
 
     @Test
-    @DisplayName("Score header link href is /dashboard?sort=score&amp;type=text with ?type=text (REQ 1.6)")
-    void scoreHeaderLinkHrefWithTypeText() {
+    @DisplayName("Each row cell carries a data-value attribute the client-side sorter can compare against")
+    void rowCellsCarryDataValueAttributes() {
         seedFixture();
 
-        ResponseEntity<String> response = getDashboard("/dashboard?type=text");
+        ResponseEntity<String> response = getDashboard("/dashboard");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         String body = response.getBody();
         assertThat(body).isNotNull();
 
-        // Thymeleaf HTML-escapes the ampersand inside attribute values.
-        assertThat(body).contains("/dashboard?sort=score&amp;type=text");
-    }
-
-    // ---------------------------------------------------------------------
-    // REQ 3.5 — Active-sort indicator on the Score column header
-    // ---------------------------------------------------------------------
-
-    @Test
-    @DisplayName("Score <th> carries 'active-sort' class and a ▼ glyph when sort=score (REQ 3.5)")
-    void scoreHeaderHasActiveSortIndicatorWhenSortIsScore() {
-        seedFixture();
-
-        ResponseEntity<String> response = getDashboard("/dashboard?sort=score");
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        String body = response.getBody();
-        assertThat(body).isNotNull();
-
-        // The Score header is the only <th> with class score-col; classappend
-        // adds " active-sort" so the rendered class attribute is exactly
-        // "score-col active-sort".
-        assertThat(body)
-                .as("Score <th> must carry both 'score-col' and 'active-sort' CSS classes")
-                .contains("class=\"score-col active-sort\"");
-        assertThat(body)
-                .as("Active-sort indicator must include a ▼ glyph")
-                .contains("▼");
-    }
-
-    @Test
-    @DisplayName("Score <th> does NOT carry 'active-sort' class when sort=popularity (REQ 3.5)")
-    void scoreHeaderHasNoActiveSortClassWhenSortIsNotScore() {
-        seedFixture();
-
-        ResponseEntity<String> response = getDashboard("/dashboard?sort=popularity");
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        String body = response.getBody();
-        assertThat(body).isNotNull();
-
-        // The token "active-sort" still appears in the inline <style> block
-        // (`th.active-sort a { ... }`), so the negative assertion has to be
-        // scoped to the class-attribute combination — when sort != score the
-        // Score header's class attribute is just "score-col".
-        assertThat(body)
-                .as("Score <th> class must remain 'score-col' alone when sort != score")
-                .doesNotContain("score-col active-sort");
+        // Score cells must expose the raw numeric value (not just the
+        // formatted "100.0" text) so client-side numeric comparison works.
+        assertThat(body).containsPattern("data-value=\"100\\.0\"");
+        // Title cells expose their text verbatim.
+        assertThat(body).contains("data-value=\"Title-01\"");
+        // Type cells expose lower-case "video" / "text".
+        assertThat(body).containsPattern("data-value=\"(video|text)\"");
     }
 
     // ---------------------------------------------------------------------
@@ -646,12 +628,13 @@ class DashboardControllerIT {
     }
 
     // ---------------------------------------------------------------------
-    // REQ 9.4, 9.5, 10.4 — no client-side script, no pagination, no search box
+    // REQ 9.4, 9.5, 10.4 — no pagination, no search box (script allowed
+    // for client-side column sorting)
     // ---------------------------------------------------------------------
 
     @Test
-    @DisplayName("Body contains no <script>, no <input>, no name=\"page\" and no name=\"q\" (REQ 9.4, 9.5, 10.4)")
-    void bodyHasNoScriptOrPaginationOrSearchBox() {
+    @DisplayName("Body contains no <input>, no name=\"page\" and no name=\"q\" (REQ 9.4, 9.5, 10.4)")
+    void bodyHasNoPaginationOrSearchBox() {
         seedFixture();
 
         ResponseEntity<String> response = getDashboard("/dashboard");
@@ -660,9 +643,6 @@ class DashboardControllerIT {
         String body = response.getBody();
         assertThat(body).isNotNull();
 
-        assertThat(body)
-                .as("dashboard must remain 100% server-rendered, no <script> tags")
-                .doesNotContain("<script");
         assertThat(body)
                 .as("dashboard must not render any <input> element (no search box, no hidden inputs)")
                 .doesNotContain("<input");
