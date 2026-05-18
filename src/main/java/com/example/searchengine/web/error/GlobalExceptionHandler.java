@@ -1,11 +1,17 @@
 package com.example.searchengine.web.error;
 
+import com.example.searchengine.application.analytics.SearchAnalyticsRecord;
+import com.example.searchengine.application.analytics.SearchAnalyticsRecorder;
 import com.example.searchengine.domain.content.ContentRepositoryException;
+import com.example.searchengine.infrastructure.admin.ClientIpHasher;
+import com.example.searchengine.infrastructure.ratelimit.ClientIpResolver;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -19,6 +25,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import java.time.Instant;
 
 /**
  * Single translation point from controller exceptions to the standardized error
@@ -73,10 +81,22 @@ public class GlobalExceptionHandler {
     /** Literal returned for every {@code 500 INTERNAL_ERROR} response (REQ 14.5). */
     static final String INTERNAL_ERROR_MESSAGE = "Internal server error";
 
-    private final ErrorMessageSanitizer sanitizer;
+    /** The search API path prefix used to determine if a request is a search request. */
+    private static final String SEARCH_PATH = "/api/v1/search";
 
-    public GlobalExceptionHandler(ErrorMessageSanitizer sanitizer) {
+    private final ErrorMessageSanitizer sanitizer;
+    private final SearchAnalyticsRecorder analyticsRecorder;
+    private final ClientIpHasher clientIpHasher;
+    private final ClientIpResolver clientIpResolver;
+
+    public GlobalExceptionHandler(ErrorMessageSanitizer sanitizer,
+                                  SearchAnalyticsRecorder analyticsRecorder,
+                                  ClientIpHasher clientIpHasher,
+                                  ClientIpResolver clientIpResolver) {
         this.sanitizer = sanitizer;
+        this.analyticsRecorder = analyticsRecorder;
+        this.clientIpHasher = clientIpHasher;
+        this.clientIpResolver = clientIpResolver;
     }
 
     // ------------------------------------------------------------------------
@@ -122,9 +142,13 @@ public class GlobalExceptionHandler {
     // ------------------------------------------------------------------------
 
     @ExceptionHandler(ContentRepositoryException.class)
-    public ResponseEntity<ErrorResponse> handleRepository(ContentRepositoryException ex) {
+    public ResponseEntity<ErrorResponse> handleRepository(ContentRepositoryException ex,
+                                                          HttpServletRequest request) {
         log.error("repository error: {}", ex.toString(), ex);
-        return build(HttpStatus.SERVICE_UNAVAILABLE, CODE_DATABASE_UNAVAILABLE, "Database temporarily unavailable");
+        ResponseEntity<ErrorResponse> response = build(HttpStatus.SERVICE_UNAVAILABLE,
+                CODE_DATABASE_UNAVAILABLE, "Database temporarily unavailable");
+        recordAnalyticsIfSearch(request, CODE_DATABASE_UNAVAILABLE);
+        return response;
     }
 
     // ------------------------------------------------------------------------
@@ -132,9 +156,13 @@ public class GlobalExceptionHandler {
     // ------------------------------------------------------------------------
 
     @ExceptionHandler(ProviderException.class)
-    public ResponseEntity<ErrorResponse> handleProvider(ProviderException ex) {
+    public ResponseEntity<ErrorResponse> handleProvider(ProviderException ex,
+                                                        HttpServletRequest request) {
         log.error("provider error: {}", ex.toString(), ex);
-        return build(HttpStatus.BAD_GATEWAY, CODE_PROVIDER_ERROR, "Upstream provider error");
+        ResponseEntity<ErrorResponse> response = build(HttpStatus.BAD_GATEWAY,
+                CODE_PROVIDER_ERROR, "Upstream provider error");
+        recordAnalyticsIfSearch(request, CODE_PROVIDER_ERROR);
+        return response;
     }
 
     // ------------------------------------------------------------------------
@@ -142,9 +170,72 @@ public class GlobalExceptionHandler {
     // ------------------------------------------------------------------------
 
     @ExceptionHandler(Throwable.class)
-    public ResponseEntity<ErrorResponse> handleThrowable(Throwable ex) {
+    public ResponseEntity<ErrorResponse> handleThrowable(Throwable ex,
+                                                         HttpServletRequest request) {
         log.error("unhandled exception", ex);
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, CODE_INTERNAL_ERROR, INTERNAL_ERROR_MESSAGE);
+        ResponseEntity<ErrorResponse> response = build(HttpStatus.INTERNAL_SERVER_ERROR,
+                CODE_INTERNAL_ERROR, INTERNAL_ERROR_MESSAGE);
+        recordAnalyticsIfSearch(request, CODE_INTERNAL_ERROR);
+        return response;
+    }
+
+    // ------------------------------------------------------------------------
+    // Analytics recording for 5xx errors (REQ 4.3)
+    // ------------------------------------------------------------------------
+
+    /**
+     * Records a search analytics entry for 5xx errors, but only if the
+     * failing request targeted the search endpoint ({@code /api/v1/search}).
+     * Non-search requests are silently skipped (REQ 4.3).
+     *
+     * <p>4xx validation errors are intentionally NOT recorded (REQ 4.2).</p>
+     */
+    private void recordAnalyticsIfSearch(HttpServletRequest request, String errorCode) {
+        String path = request.getRequestURI();
+        if (!SEARCH_PATH.equals(path)) {
+            return;
+        }
+
+        try {
+            String q = request.getParameter("q");
+            String type = request.getParameter("type");
+            String sort = request.getParameter("sort");
+            String pageParam = request.getParameter("page");
+            String limitParam = request.getParameter("limit");
+
+            int page = parseIntOrDefault(pageParam, 1);
+            int limit = parseIntOrDefault(limitParam, 10);
+            String resolvedSort = (sort == null || sort.isBlank()) ? "score" : sort;
+
+            SearchAnalyticsRecord record = new SearchAnalyticsRecord(
+                    Instant.now(),
+                    q != null ? q : "",
+                    type,
+                    resolvedSort,
+                    page,
+                    limit,
+                    null,       // totalResults is null on 5xx
+                    0,          // latencyMs not meaningful for error path
+                    false,      // cacheHit is false on error
+                    MDC.get("requestId"),
+                    clientIpHasher.hash(clientIpResolver.resolve(request)),
+                    errorCode
+            );
+            analyticsRecorder.record(record);
+        } catch (Exception ex) {
+            log.warn("Failed to record error analytics (best-effort, swallowed): {}", ex.getMessage());
+        }
+    }
+
+    private static int parseIntOrDefault(String value, int defaultValue) {
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     // ------------------------------------------------------------------------

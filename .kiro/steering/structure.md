@@ -114,3 +114,7 @@ Test-class suffix decides where it runs:
 | A new HTTP endpoint | New `@RestController` in `web/api/` + DTOs; call into an application service, never into infrastructure directly. |
 | A schema change | New Flyway migration `Vn__description.sql` in `src/main/resources/db/migration/` — never modify `V1__init.sql`. |
 | A new cross-cutting filter | `infrastructure/<concern>/` (logging, ratelimit, …); register via a Spring `@Configuration`. |
+| A new metric | `infrastructure/metrics/` | Create a `@Component` with Micrometer meters; inject into the relevant service. Add unit test in `src/test/java/.../infrastructure/metrics/`. |
+| A new admin endpoint | `web/api/` | Create a `@RestController` under `/api/v1/admin/`; protected by `AdminAuthFilter`. Add unit test + IT. |
+| A new analytics sink | `infrastructure/analytics/` | Implement `SearchAnalyticsSink` interface; register in `AnalyticsConfig` via a new `analytics.search.sink` value. |
+| A new export format | `web/api/` | Add a new method to `ExportController` (or a new controller); reuse `SearchService.search(SearchQuery)`. |

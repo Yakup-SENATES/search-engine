@@ -7,6 +7,8 @@ import com.example.searchengine.domain.provider.ContentProvider;
 import com.example.searchengine.domain.provider.RawContent;
 import com.example.searchengine.domain.scoring.ScoreBreakdown;
 import com.example.searchengine.domain.scoring.ScoringEngine;
+import com.example.searchengine.infrastructure.admin.ProviderHealthRegistry;
+import com.example.searchengine.infrastructure.metrics.IngestMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
@@ -26,6 +28,10 @@ import java.util.List;
  *
  * <p>Cache eviction of the "search" region occurs after a successful run
  * (REQ 11.4, REQ 12.4).</p>
+ *
+ * <p>Each upsert outcome and each normalization rejection is recorded against
+ * {@link IngestMetrics} so operators can plot the ingest pipeline from
+ * Prometheus (operability quick-wins REQ 1.6).</p>
  */
 @Component
 public class DefaultContentAggregator implements ContentAggregator {
@@ -37,17 +43,23 @@ public class DefaultContentAggregator implements ContentAggregator {
     private final ScoringEngine scoringEngine;
     private final ContentRepository contentRepository;
     private final Clock clock;
+    private final IngestMetrics ingestMetrics;
+    private final ProviderHealthRegistry providerHealthRegistry;
 
     public DefaultContentAggregator(List<ContentProvider> providers,
                                     Normalizer normalizer,
                                     ScoringEngine scoringEngine,
                                     ContentRepository contentRepository,
-                                    Clock clock) {
+                                    Clock clock,
+                                    IngestMetrics ingestMetrics,
+                                    ProviderHealthRegistry providerHealthRegistry) {
         this.providers = providers;
         this.normalizer = normalizer;
         this.scoringEngine = scoringEngine;
         this.contentRepository = contentRepository;
         this.clock = clock;
+        this.ingestMetrics = ingestMetrics;
+        this.providerHealthRegistry = providerHealthRegistry;
     }
 
     @Override
@@ -65,12 +77,14 @@ public class DefaultContentAggregator implements ContentAggregator {
                 long elapsedMs = (System.nanoTime() - fetchStart) / 1_000_000;
                 log.error("Provider fetch failed provider={} elapsedMs={} cause={}",
                         provider.name(), elapsedMs, e.toString());
+                providerHealthRegistry.recordFailure(provider.name(), e);
                 continue; // REQ 11.3: isolate provider failure
             }
 
             long elapsedMs = (System.nanoTime() - fetchStart) / 1_000_000;
             log.info("Provider fetch completed provider={} items={} elapsedMs={}",
                     provider.name(), rawItems.size(), elapsedMs);
+            providerHealthRegistry.recordSuccess(provider.name(), rawItems.size());
 
             for (RawContent raw : rawItems) {
                 processItem(provider.name(), raw, evaluationAt);
@@ -84,6 +98,7 @@ public class DefaultContentAggregator implements ContentAggregator {
         if (result instanceof NormalizationResult.Rejected rejected) {
             log.warn("Normalization rejected provider={} externalId={} field={} reason={}",
                     providerName, raw.externalId(), rejected.field(), rejected.reason());
+            ingestMetrics.recordRejected(providerName, rejected.field());
             return;
         }
 
@@ -120,6 +135,10 @@ public class DefaultContentAggregator implements ContentAggregator {
             UpsertOutcome outcome = contentRepository.upsert(scored);
             log.info("Content upserted provider={} externalId={} outcome={}",
                     providerName, scored.externalId(), outcome.name().toLowerCase());
+            switch (outcome) {
+                case INSERTED -> ingestMetrics.recordInserted(providerName);
+                case UPDATED -> ingestMetrics.recordUpdated(providerName);
+            }
         } catch (Exception e) {
             log.error("Content upsert failed provider={} externalId={} cause={}",
                     providerName, scored.externalId(), e.toString());

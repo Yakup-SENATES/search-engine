@@ -15,6 +15,6 @@ import org.springframework.context.annotation.Configuration;
  * injection into scheduling components.</p>
  */
 @Configuration
-@EnableConfigurationProperties(AggregatorProperties.class)
+@EnableConfigurationProperties({AggregatorProperties.class, ExportProperties.class})
 public class ConfigPropertiesConfig {
 }

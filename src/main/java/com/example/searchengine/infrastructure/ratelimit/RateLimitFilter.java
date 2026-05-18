@@ -1,5 +1,6 @@
 package com.example.searchengine.infrastructure.ratelimit;
 
+import com.example.searchengine.infrastructure.metrics.RateLimitMetrics;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.ConsumptionProbe;
@@ -42,7 +43,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     /** REQ 13.1: only paths under {@code /api/v1/} are subject to rate limiting. */
-    static final String API_PATH_PREFIX = "/api/v1/";
+    public static final String API_PATH_PREFIX = "/api/v1/";
 
     /** Body emitted on rejection. Matches the error envelope mandated by REQ 14.1. */
     static final String RATE_LIMITED_BODY =
@@ -50,11 +51,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final RateLimitProperties properties;
     private final ClientIpResolver clientIpResolver;
+    private final RateLimitMetrics rateLimitMetrics;
     private final ConcurrentMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
-    public RateLimitFilter(RateLimitProperties properties, ClientIpResolver clientIpResolver) {
+    public RateLimitFilter(RateLimitProperties properties,
+                           ClientIpResolver clientIpResolver,
+                           RateLimitMetrics rateLimitMetrics) {
         this.properties = properties;
         this.clientIpResolver = clientIpResolver;
+        this.rateLimitMetrics = rateLimitMetrics;
     }
 
     @Override
@@ -82,6 +87,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (retryAfterSeconds > properties.getWindowSeconds()) {
             retryAfterSeconds = properties.getWindowSeconds();
         }
+
+        rateLimitMetrics.recordBlocked(API_PATH_PREFIX);
 
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds));

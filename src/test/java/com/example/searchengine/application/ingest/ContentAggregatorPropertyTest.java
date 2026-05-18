@@ -7,6 +7,9 @@ import com.example.searchengine.domain.provider.ContentProvider;
 import com.example.searchengine.domain.provider.RawContent;
 import com.example.searchengine.domain.scoring.ScoreBreakdown;
 import com.example.searchengine.domain.scoring.ScoringEngine;
+import com.example.searchengine.infrastructure.admin.ProviderHealthRegistry;
+import com.example.searchengine.infrastructure.metrics.IngestMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import net.jqwik.api.*;
 import net.jqwik.api.lifecycle.BeforeProperty;
 
@@ -127,7 +130,9 @@ class ContentAggregatorPropertyTest {
 
         // Build the aggregator
         DefaultContentAggregator aggregator = new DefaultContentAggregator(
-                providers, normalizer, scoringEngine, repository, FIXED_CLOCK
+                providers, normalizer, scoringEngine, repository, FIXED_CLOCK,
+                new IngestMetrics(new SimpleMeterRegistry()),
+                new ProviderHealthRegistry(FIXED_CLOCK)
         );
 
         // Act: runSync should never throw

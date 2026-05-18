@@ -1,7 +1,10 @@
 package com.example.searchengine.web.api;
 
+import com.example.searchengine.application.analytics.SearchAnalyticsRecorder;
 import com.example.searchengine.application.search.SearchResult;
 import com.example.searchengine.application.search.SearchService;
+import com.example.searchengine.infrastructure.admin.ClientIpHasher;
+import com.example.searchengine.infrastructure.ratelimit.ClientIpResolver;
 import com.example.searchengine.web.error.ErrorMessageSanitizer;
 import com.example.searchengine.web.error.GlobalExceptionHandler;
 
@@ -72,9 +75,12 @@ class SearchControllerValidationPropertyTest {
     @BeforeProperty
     void setUp() {
         searchService = mock(SearchService.class);
-        SearchController controller = new SearchController(searchService);
+        SearchAnalyticsRecorder analyticsRecorder = mock(SearchAnalyticsRecorder.class);
+        ClientIpHasher clientIpHasher = new ClientIpHasher();
+        ClientIpResolver clientIpResolver = new ClientIpResolver();
+        SearchController controller = new SearchController(searchService, analyticsRecorder, clientIpHasher, clientIpResolver);
         ErrorMessageSanitizer sanitizer = new ErrorMessageSanitizer(List.of());
-        GlobalExceptionHandler advice = new GlobalExceptionHandler(sanitizer);
+        GlobalExceptionHandler advice = new GlobalExceptionHandler(sanitizer, analyticsRecorder, clientIpHasher, clientIpResolver);
 
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();

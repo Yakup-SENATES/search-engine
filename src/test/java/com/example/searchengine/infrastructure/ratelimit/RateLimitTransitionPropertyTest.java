@@ -2,6 +2,8 @@ package com.example.searchengine.infrastructure.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.searchengine.infrastructure.metrics.RateLimitMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -46,7 +48,8 @@ class RateLimitTransitionPropertyTest {
         props.setRequestsPerWindow(scenario.requestsPerWindow());
         props.setWindowSeconds(scenario.windowSeconds());
 
-        RateLimitFilter filter = new RateLimitFilter(props, new ClientIpResolver());
+        RateLimitFilter filter = new RateLimitFilter(props, new ClientIpResolver(),
+                new RateLimitMetrics(new SimpleMeterRegistry()));
         FilterChain chain = (req, res) -> {
             // No-op downstream — the filter does not set a status on success, so the
             // default of 200 from MockHttpServletResponse stands in for "not 429".

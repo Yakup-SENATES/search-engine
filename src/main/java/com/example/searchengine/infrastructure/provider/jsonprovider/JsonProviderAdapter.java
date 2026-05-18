@@ -3,11 +3,13 @@ package com.example.searchengine.infrastructure.provider.jsonprovider;
 import com.example.searchengine.domain.provider.ContentProvider;
 import com.example.searchengine.domain.provider.RawContent;
 import com.example.searchengine.infrastructure.config.ProviderProperties;
+import com.example.searchengine.infrastructure.metrics.ProviderFetchMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,6 +22,9 @@ import java.util.Optional;
  *   <li>Network failures (connection error, timeout) → log and return empty list (REQ 2.6)</li>
  *   <li>Per-item parse failures → log and skip the item, continue with others (REQ 2.5)</li>
  *   <li>Logs provider name and elapsed ms per fetch (REQ 16.4)</li>
+ *   <li>Records {@code provider_fetch_duration_seconds} and
+ *       {@code provider_fetch_failures_total} on every outcome via
+ *       {@link ProviderFetchMetrics} (REQ 1.2, 1.3 — operability quick-wins)</li>
  * </ul>
  */
 @Component
@@ -31,14 +36,17 @@ public class JsonProviderAdapter implements ContentProvider {
     private final JsonProviderClient client;
     private final JsonContentMapper mapper;
     private final String baseUrl;
+    private final ProviderFetchMetrics metrics;
 
     public JsonProviderAdapter(
             JsonProviderClient client,
-            ProviderProperties providerProperties
+            ProviderProperties providerProperties,
+            ProviderFetchMetrics metrics
     ) {
         this.client = client;
         this.mapper = new JsonContentMapper();
         this.baseUrl = providerProperties.getJson().getBaseUrl();
+        this.metrics = metrics;
     }
 
     @Override
@@ -48,13 +56,15 @@ public class JsonProviderAdapter implements ContentProvider {
 
     @Override
     public List<RawContent> fetch() {
-        long startMs = System.currentTimeMillis();
+        long startNanos = System.nanoTime();
+        boolean success = false;
         try {
             JsonProviderResponse response = client.fetch();
 
             if (response == null || response.contents() == null) {
                 log.warn("provider={} url={} returned null or empty response", name(), baseUrl);
-                logElapsed(startMs);
+                logElapsed(startNanos);
+                success = true; // empty payload is a successful but uninteresting fetch
                 return List.of();
             }
 
@@ -65,22 +75,29 @@ public class JsonProviderAdapter implements ContentProvider {
                     .toList();
 
             log.info("provider={} fetched={} items elapsed={}ms", name(), results.size(),
-                    System.currentTimeMillis() - startMs);
+                    elapsedMillis(startNanos));
+            success = true;
             return results;
 
         } catch (RestClientException e) {
             log.error("provider={} url={} fetch failed cause={}", name(), baseUrl, e.getMessage());
-            logElapsed(startMs);
+            logElapsed(startNanos);
             return List.of();
         } catch (Exception e) {
             // Catch-all for unexpected failures (e.g. deserialization issues)
             log.error("provider={} url={} unexpected failure cause={}", name(), baseUrl, e.getMessage());
-            logElapsed(startMs);
+            logElapsed(startNanos);
             return List.of();
+        } finally {
+            metrics.record(PROVIDER_NAME, Duration.ofNanos(System.nanoTime() - startNanos), success);
         }
     }
 
-    private void logElapsed(long startMs) {
-        log.info("provider={} elapsed={}ms", name(), System.currentTimeMillis() - startMs);
+    private void logElapsed(long startNanos) {
+        log.info("provider={} elapsed={}ms", name(), elapsedMillis(startNanos));
+    }
+
+    private static long elapsedMillis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000L;
     }
 }

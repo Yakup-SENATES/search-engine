@@ -45,3 +45,20 @@ ratelimit:
   enabled: false                                # disabled locally for easier testing
   requests-per-window: 100
   window-seconds: 60
+
+admin:
+  auth:
+    token:                                      # empty = admin auth disabled locally
+
+analytics:
+  search:
+    enabled: true
+    sink: log                                   # local dev defaults to log sink
+
+# Mirror the production default so /actuator/prometheus is scrapeable
+# from a localhost dev run as well.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus

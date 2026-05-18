@@ -1,6 +1,9 @@
 package com.example.searchengine.web.error;
 
+import com.example.searchengine.application.analytics.SearchAnalyticsRecorder;
 import com.example.searchengine.domain.content.ContentRepositoryException;
+import com.example.searchengine.infrastructure.admin.ClientIpHasher;
+import com.example.searchengine.infrastructure.ratelimit.ClientIpResolver;
 
 import jakarta.validation.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.http.MockHttpInputMessage;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -46,11 +50,23 @@ import static org.mockito.Mockito.mock;
 class GlobalExceptionHandlerTest {
 
     private GlobalExceptionHandler handler;
+    private MockHttpServletRequest mockRequest;
 
     @BeforeEach
     void setUp() {
         // No-op sanitizer: empty secret list lets messages flow through unchanged.
-        handler = new GlobalExceptionHandler(new ErrorMessageSanitizer(List.of()));
+        SearchAnalyticsRecorder analyticsRecorder = mock(SearchAnalyticsRecorder.class);
+        ClientIpHasher clientIpHasher = new ClientIpHasher();
+        ClientIpResolver clientIpResolver = new ClientIpResolver();
+        handler = new GlobalExceptionHandler(
+                new ErrorMessageSanitizer(List.of()),
+                analyticsRecorder,
+                clientIpHasher,
+                clientIpResolver
+        );
+        mockRequest = new MockHttpServletRequest();
+        mockRequest.setRequestURI("/api/v1/search");
+        mockRequest.setParameter("q", "test");
     }
 
     // ------------------------------------------------------------------
@@ -159,7 +175,7 @@ class GlobalExceptionHandlerTest {
         ContentRepositoryException ex =
                 new ContentRepositoryException("connection refused", new RuntimeException("io"));
 
-        ResponseEntity<ErrorResponse> response = handler.handleRepository(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleRepository(ex, mockRequest);
 
         assertEnvelope(response, HttpStatus.SERVICE_UNAVAILABLE, "DATABASE_UNAVAILABLE");
     }
@@ -173,7 +189,7 @@ class GlobalExceptionHandlerTest {
     void providerException_returns502WithProviderError() {
         ProviderException ex = new ProviderException("upstream 500");
 
-        ResponseEntity<ErrorResponse> response = handler.handleProvider(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleProvider(ex, mockRequest);
 
         assertEnvelope(response, HttpStatus.BAD_GATEWAY, "PROVIDER_ERROR");
     }
@@ -193,7 +209,7 @@ class GlobalExceptionHandlerTest {
         // started echoing the exception text this assertion would catch it.
         RuntimeException ex = new RuntimeException("npe at com.example.Internals.boom");
 
-        ResponseEntity<ErrorResponse> response = handler.handleThrowable(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleThrowable(ex, mockRequest);
 
         assertEnvelope(response, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR");
         assertThat(response.getBody().error().message()).isEqualTo("Internal server error");
@@ -207,7 +223,7 @@ class GlobalExceptionHandlerTest {
         // mapping is meant to absorb.
         Throwable ex = new Throwable("low-level failure");
 
-        ResponseEntity<ErrorResponse> response = handler.handleThrowable(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleThrowable(ex, mockRequest);
 
         assertEnvelope(response, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR");
         assertThat(response.getBody().error().message()).isEqualTo("Internal server error");

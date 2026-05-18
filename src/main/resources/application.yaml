@@ -75,3 +75,28 @@ resilience4j:
         wait-duration: 500ms
         enable-exponential-backoff: true
         exponential-backoff-multiplier: 2.0
+
+# Actuator / Management endpoints
+# Operator-tunable: set MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE to a
+# comma-separated list (e.g. "health,prometheus,info") to control which
+# actuator endpoints are exposed over HTTP. The default exposes only
+# liveness (/actuator/health) and the Prometheus scrape endpoint
+# (/actuator/prometheus) — see operability-quick-wins spec, REQ 1.
+admin:
+  auth:
+    token: ${ADMIN_API_TOKEN:}                  # required for /api/v1/admin/* — empty disables admin
+
+analytics:
+  search:
+    enabled: ${ANALYTICS_ENABLED:true}
+    sink: ${ANALYTICS_SINK:db}                  # db | log | none (REQ 4.5, 4.6)
+
+export:
+  search:
+    max-rows: ${EXPORT_MAX_ROWS:1000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,prometheus}
