@@ -1,21 +1,14 @@
 package com.example.searchengine.application.search;
 
 import com.example.searchengine.domain.content.*;
+import com.example.searchengine.infrastructure.cache.SearchCacheKeyGenerator;
+import com.example.searchengine.infrastructure.metrics.SearchMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import net.jqwik.api.*;
 import net.jqwik.api.lifecycle.BeforeProperty;
 import org.mockito.Mockito;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
-import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.cache.interceptor.KeyGenerator;
-import com.example.searchengine.infrastructure.cache.SearchCacheKeyGenerator;
-
-import org.springframework.aop.framework.ProxyFactory;
-import org.springframework.cache.interceptor.CacheInterceptor;
-import org.springframework.cache.interceptor.CacheOperationSource;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,28 +35,16 @@ class SearchServiceCachePropertyTest {
 
     private ContentRepository repository;
     private CacheManager cacheManager;
-    private SearchService searchService;
+    private SearchCacheKeyGenerator keyGenerator;
+    private DefaultSearchService searchService;
 
     @BeforeProperty
     void setUp() {
         repository = mock(ContentRepository.class);
         cacheManager = new ConcurrentMapCacheManager("search");
-
-        // Build a Spring context with caching enabled to get proper @Cacheable proxying
-        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
-        ctx.registerBean("contentRepository", ContentRepository.class, () -> repository);
-        ctx.registerBean("searchCacheKeyGenerator", KeyGenerator.class, SearchCacheKeyGenerator::new);
-        ctx.registerBean("cacheManager", CacheManager.class, () -> cacheManager);
-        ctx.register(CacheTestConfig.class);
-        ctx.register(DefaultSearchService.class);
-        ctx.refresh();
-
-        searchService = ctx.getBean(SearchService.class);
-    }
-
-    @Configuration
-    @EnableCaching
-    static class CacheTestConfig {
+        keyGenerator = new SearchCacheKeyGenerator();
+        SearchMetrics metrics = new SearchMetrics(new SimpleMeterRegistry());
+        searchService = new DefaultSearchService(repository, cacheManager, keyGenerator, metrics);
     }
 
     // ─── Property (a): Repeat queries hit cache ───────────────────────────────
@@ -130,14 +111,17 @@ class SearchServiceCachePropertyTest {
     @Property(tries = 100)
     @Label("Feature: search-engine-service, Property 9: Cache semantics — cache disabled always invokes repository")
     void cacheDisabledAlwaysInvokesRepository(@ForAll("searchQueries") SearchQuery query) {
-        // Arrange: use a no-op search service (no caching) to simulate cache.search.enabled=false
-        // When cache is disabled, Spring uses NoOpCacheManager, so @Cacheable is a no-op.
-        // We simulate this by creating a non-proxied service directly.
+        // Arrange: a search service backed by a NoOpCacheManager — cache.search.enabled=false
         ContentRepository directRepo = mock(ContentRepository.class);
         SearchPage page = buildSearchPage(query);
         when(directRepo.search(any(SearchCriteria.class))).thenReturn(page);
 
-        DefaultSearchService noCacheService = new DefaultSearchService(directRepo);
+        DefaultSearchService noCacheService = new DefaultSearchService(
+                directRepo,
+                new org.springframework.cache.support.NoOpCacheManager(),
+                new SearchCacheKeyGenerator(),
+                new SearchMetrics(new SimpleMeterRegistry())
+        );
 
         // Act: call twice
         noCacheService.search(query);
@@ -165,8 +149,7 @@ class SearchServiceCachePropertyTest {
 
         // Assert: no cache entry was written
         var cache = cacheManager.getCache("search");
-        SearchCacheKeyGenerator keyGen = new SearchCacheKeyGenerator();
-        Object key = keyGen.generate(searchService, null, query);
+        Object key = keyGenerator.generate(searchService, null, query);
         assertThat(cache.get(key)).isNull();
 
         // Arrange: now repository succeeds

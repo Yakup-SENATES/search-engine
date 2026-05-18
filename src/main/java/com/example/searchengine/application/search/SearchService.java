@@ -7,9 +7,12 @@ package com.example.searchengine.application.search;
  * this service trusts its input shape but still escapes FTS metacharacters
  * (REQ 8.5) via the repository's parameterized query.</p>
  *
- * <p>Caching: the {@code @Cacheable} annotation on the implementation keys on
- * the 5-tuple {@code (q, type, sort, page, limit)} into the "search" cache
- * region (REQ 12.1). Cache backend failure falls through transparently
+ * <p>Caching: the implementation consults the {@code search} cache region
+ * manually (no {@code @Cacheable}) and keys on the 5-tuple
+ * {@code (q, type, sort, page, limit)} via the {@code searchCacheKeyGenerator}
+ * bean (REQ 12.1). The manual access pattern lets the implementation track
+ * cache hit / miss outcomes for Micrometer metrics (operability quick-wins
+ * REQ 1.4 / 1.5). Cache backend failure falls through transparently
  * (REQ 12.7).</p>
  *
  * <p>REQ 8.2, 8.5, 9.1, 9.3–9.8, 12.1</p>

@@ -12,6 +12,9 @@ import com.example.searchengine.domain.provider.ContentProvider;
 import com.example.searchengine.domain.provider.RawContent;
 import com.example.searchengine.domain.scoring.ScoreBreakdown;
 import com.example.searchengine.domain.scoring.ScoringEngine;
+import com.example.searchengine.infrastructure.admin.ProviderHealthRegistry;
+import com.example.searchengine.infrastructure.metrics.IngestMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -87,7 +90,9 @@ class DefaultContentAggregatorTest {
 
         DefaultContentAggregator aggregator = new DefaultContentAggregator(
                 List.of(failingProvider, healthyProvider),
-                normalizer, scoringEngine, contentRepository, FIXED_CLOCK
+                normalizer, scoringEngine, contentRepository, FIXED_CLOCK,
+                new IngestMetrics(new SimpleMeterRegistry()),
+                new ProviderHealthRegistry(FIXED_CLOCK)
         );
 
         // Act
@@ -126,7 +131,9 @@ class DefaultContentAggregatorTest {
 
         DefaultContentAggregator aggregator = new DefaultContentAggregator(
                 List.of(provider),
-                normalizer, scoringEngine, contentRepository, FIXED_CLOCK
+                normalizer, scoringEngine, contentRepository, FIXED_CLOCK,
+                new IngestMetrics(new SimpleMeterRegistry()),
+                new ProviderHealthRegistry(FIXED_CLOCK)
         );
 
         // Act
@@ -163,7 +170,9 @@ class DefaultContentAggregatorTest {
 
         DefaultContentAggregator aggregator = new DefaultContentAggregator(
                 List.of(provider),
-                normalizer, scoringEngine, contentRepository, FIXED_CLOCK
+                normalizer, scoringEngine, contentRepository, FIXED_CLOCK,
+                new IngestMetrics(new SimpleMeterRegistry()),
+                new ProviderHealthRegistry(FIXED_CLOCK)
         );
 
         // Act
@@ -191,7 +200,9 @@ class DefaultContentAggregatorTest {
 
         DefaultContentAggregator aggregator = new DefaultContentAggregator(
                 List.of(provider),
-                normalizer, scoringEngine, contentRepository, FIXED_CLOCK
+                normalizer, scoringEngine, contentRepository, FIXED_CLOCK,
+                new IngestMetrics(new SimpleMeterRegistry()),
+                new ProviderHealthRegistry(FIXED_CLOCK)
         );
 
         // Act

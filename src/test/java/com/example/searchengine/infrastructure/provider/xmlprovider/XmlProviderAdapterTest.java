@@ -1,6 +1,8 @@
 package com.example.searchengine.infrastructure.provider.xmlprovider;
 
 import com.example.searchengine.domain.provider.RawContent;
+import com.example.searchengine.infrastructure.metrics.ProviderFetchMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,7 +39,7 @@ class XmlProviderAdapterTest {
     @BeforeEach
     void setUp() {
         XmlContentMapper mapper = new XmlContentMapper();
-        adapter = new XmlProviderAdapter(client, mapper);
+        adapter = new XmlProviderAdapter(client, mapper, new ProviderFetchMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

@@ -1,6 +1,12 @@
 package com.example.searchengine.web.openapi;
 
+import com.example.searchengine.application.analytics.SearchAnalyticsRecorder;
+import com.example.searchengine.infrastructure.admin.ClientIpHasher;
+import com.example.searchengine.infrastructure.ratelimit.ClientIpResolver;
 import com.example.searchengine.web.api.SearchController;
+import com.example.searchengine.web.api.SearchRequest;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -158,8 +164,9 @@ class OpenApiConfigTest {
 
     private static HandlerMethod searchHandlerMethod() throws NoSuchMethodException {
         Method searchMethod = SearchController.class
-                .getDeclaredMethod("search", com.example.searchengine.web.api.SearchRequest.class);
-        SearchController stub = new SearchController(null);
+                .getDeclaredMethod("search", SearchRequest.class,
+                        HttpServletRequest.class);
+        SearchController stub = new SearchController(null, null, null, null);
         return new HandlerMethod(stub, searchMethod);
     }
 

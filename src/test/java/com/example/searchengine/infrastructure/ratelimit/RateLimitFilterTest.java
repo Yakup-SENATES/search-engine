@@ -2,6 +2,8 @@ package com.example.searchengine.infrastructure.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.searchengine.infrastructure.metrics.RateLimitMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -31,7 +33,7 @@ class RateLimitFilterTest {
     }
 
     private RateLimitFilter newFilter(RateLimitProperties props) {
-        return new RateLimitFilter(props, new ClientIpResolver());
+        return new RateLimitFilter(props, new ClientIpResolver(), new RateLimitMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

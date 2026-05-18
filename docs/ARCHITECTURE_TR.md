@@ -14,9 +14,10 @@ Bu yazı, projeye ilk defa bakan bir developer için "uygulamanın hayat döngü
 - [3) Veri nereye kaydediliyor — PostgreSQL](#3-veri-nereye-kaydediliyor--postgresql)
 - [4) Veri nasıl sorgulanıyor — Search API](#4-veri-nasıl-sorgulanıyor--search-api)
 - [5) Cross-cutting concerns](#5-cross-cutting-concerns)
-- [6) Konfigürasyon](#6-konfigürasyon)
-- [7) Test stratejisi](#7-test-stratejisi)
-- [8) Build ve çalıştırma](#8-build-ve-çalıştırma)
+- [6) İşlevsel Olmayan Gözlemlenebilirlik](#6-i̇şlevsel-olmayan-gözlemlenebilirlik)
+- [7) Konfigürasyon](#7-konfigürasyon)
+- [8) Test stratejisi](#8-test-stratejisi)
+- [9) Build ve çalıştırma](#9-build-ve-çalıştırma)
 - [Kafanda canlandırması için tipik bir istek](#kafanda-canlandırması-için-tipik-bir-istek)
 - [Kod gezerken takılacağın yerler](#kod-gezerken-takılacağın-yerler)
 
@@ -264,7 +265,145 @@ public SearchResult search(SearchQuery query) { … }
 
 **Secret redaction** — `infrastructure/config/`. `ErrorMessageSanitizer` ve `SecretRedactingPropertySource` log ve hata mesajlarından konfigüre edilmiş gizli değerleri (DB password, provider URL'leri) maskeliyor.
 
-## 6) Konfigürasyon
+## 6) İşlevsel Olmayan Gözlemlenebilirlik
+
+Bu bölüm, uygulamanın operasyonel görünürlüğünü sağlayan bileşenleri anlatıyor: metrikler, sağlık durumu, analitik ve dışa aktarım. Hepsi mevcut Clean Architecture kurallarına uygun — domain'e dokunmuyor, web katmanı infrastructure'ı görmüyor.
+
+### Prometheus metrikleri — `/actuator/prometheus`
+
+Spring Boot Actuator + Micrometer + `micrometer-registry-prometheus` üçlüsüyle çalışıyor. `GET /actuator/prometheus` endpoint'i Prometheus text formatında (`text/plain; version=0.0.4`) tüm meter'ları sunuyor.
+
+Meter taksonomisi:
+
+| Meter adı | Tip | Tag'ler | Açıklama |
+| --- | --- | --- | --- |
+| `provider_fetch_duration_seconds` | Timer | `provider`, `outcome` | Provider fetch süresi (success/failure) |
+| `provider_fetch_failures_total` | Counter | `provider` | Başarısız fetch sayısı |
+| `search_query_duration_seconds` | Timer | `cache_hit` | Arama sorgusu süresi |
+| `search_cache_hits_total` | Counter | — | Cache hit sayısı |
+| `search_cache_misses_total` | Counter | — | Cache miss sayısı |
+| `ingest_items_inserted_total` | Counter | `provider` | Yeni eklenen içerik sayısı |
+| `ingest_items_updated_total` | Counter | `provider` | Güncellenen içerik sayısı |
+| `ingest_items_rejected_total` | Counter | `provider`, `reason` | Reddedilen içerik sayısı |
+| `ratelimit_blocked_total` | Counter | `path` | Rate limit'e takılan istek sayısı |
+
+Önemli güvenlik kuralı: hiçbir metrik tag'inde kullanıcı PII'si (arama terimi `q`, `requestId`, IP adresi) yer almaz. Bu kural `MetricsPiiPropertyTest` ile jqwik 200 iterasyonla doğrulanıyor.
+
+Instrumentasyon stratejisi: `infrastructure/metrics/` altında küçük `@Component` sınıfları (`ProviderFetchMetrics`, `SearchMetrics`, `IngestMetrics`, `RateLimitMetrics`) meter'ları tutuyor ve açık `recordX(...)` metotları sunuyor. AOP yok, gizli davranış yok — çağrı noktasından meter adını arayabilirsin.
+
+### Provider sağlık durumu — `/api/v1/admin/providers`
+
+Operatörün her provider'ın son senkronizasyon durumunu log okumadan görmesini sağlıyor. `GET /api/v1/admin/providers` çağrıldığında dönen JSON:
+
+```json
+{
+  "providers": [
+    {
+      "name": "provider1-json",
+      "lastSyncAt": "2024-06-15T10:30:00Z",
+      "lastSyncOutcome": "success",
+      "lastFetchedItems": 42,
+      "totalSuccesses": 128,
+      "totalFailures": 3,
+      "lastErrorMessage": null
+    }
+  ]
+}
+```
+
+`ProviderHealthDto` şeması:
+
+| Alan | Tip | Açıklama |
+| --- | --- | --- |
+| `name` | String | Provider bean adı |
+| `lastSyncAt` | ISO-8601 / null | Son sync zamanı (UTC) |
+| `lastSyncOutcome` | `"success"` / `"failure"` / null | Son sync sonucu |
+| `lastFetchedItems` | int | Son sync'te çekilen item sayısı |
+| `totalSuccesses` | long | Toplam başarılı sync sayısı |
+| `totalFailures` | long | Toplam başarısız sync sayısı |
+| `lastErrorMessage` | String / null | Son hata mesajı (sanitize edilmiş, maks 256 karakter) |
+
+Durum `ProviderHealthRegistry` (`infrastructure/admin/`) içinde process-local `ConcurrentHashMap` ile tutuluyor. `DefaultContentAggregator` her fetch sonucunda bu registry'yi güncelliyor.
+
+### Manuel senkronizasyon tetikleme — `POST /api/v1/admin/sync`
+
+Scheduler'ı beklemeden anlık sync başlatmak için:
+
+```
+POST /api/v1/admin/sync
+X-Admin-Token: <token>
+```
+
+Yanıt (HTTP 202 Accepted):
+
+```json
+{ "triggered": true, "alreadyRunning": false }
+```
+
+Eğer halihazırda bir sync çalışıyorsa:
+
+```json
+{ "triggered": false, "alreadyRunning": true }
+```
+
+`SyncCoordinator` (`infrastructure/sync/`) `AtomicBoolean` guard'ını hem `SyncScheduler` hem `AdminSyncController` için paylaşıyor. Gerçek `runSync()` çağrısı Spring `TaskExecutor` üzerinde ayrı thread'de çalışıyor — HTTP isteği hemen 202 ile dönüyor. Sync tamamlandığında `@CacheEvict(allEntries=true)` tetikleniyor ve arama cache'i temizleniyor.
+
+### Arama analitiği (Search Analytics)
+
+Her `GET /api/v1/search` çağrısı sonrasında bir `SearchAnalyticsRecord` kaydediliyor:
+
+| Alan | Açıklama |
+| --- | --- |
+| `requestedAt` | İstek zamanı (ISO-8601) |
+| `q` | Arama terimi |
+| `type` | İçerik tipi filtresi (nullable) |
+| `sort`, `page`, `limit` | Sayfalama/sıralama parametreleri |
+| `totalResults` | Bulunan sonuç sayısı (5xx'te null) |
+| `latencyMs` | Sorgu süresi (ms) |
+| `cacheHit` | Cache'ten mi geldi |
+| `requestId` | MDC request ID |
+| `clientIpHash` | SHA-256 hex hash (PII saklanmıyor) |
+| `errorCode` | 5xx durumunda hata kodu |
+
+Üç sink implementasyonu var (`infrastructure/analytics/`):
+
+- **`JdbcSearchAnalyticsSink`** (varsayılan) — `search_analytics` tablosuna `JdbcTemplate` ile INSERT. Tablo `V2__search_analytics.sql` Flyway migration'ı ile oluşturuluyor.
+- **`LogSearchAnalyticsSink`** — tek satır structured log (INFO, `searchAnalytics` marker).
+- **`NoOpSearchAnalyticsSink`** — hiçbir şey yapmıyor (`analytics.search.enabled=false` veya `sink=none`).
+
+Kayıt **best-effort**: sink hata verirse `SearchAnalyticsRecorder` uyarı loglar ve kullanıcıya dönen arama yanıtı etkilenmez. 4xx validation hatalarında kayıt yapılmaz; 5xx hatalarında `errorCode` alanıyla birlikte kayıt düşer.
+
+Sink seçimi `analytics.search.sink` property'si ile yapılıyor: `db` | `log` | `none`.
+
+### CSV / JSON dışa aktarım
+
+Arama sonuçlarını dosya olarak indirmek için iki endpoint:
+
+```
+GET /api/v1/search.csv?q=…&type=…&sort=…&limit=…
+GET /api/v1/search.json?q=…&type=…&sort=…&limit=…
+```
+
+**CSV** — `Content-Type: text/csv; charset=UTF-8`, UTF-8 BOM prefix (Excel uyumluluğu), `Content-Disposition: attachment; filename="search-{yyyyMMdd-HHmmss}.csv"`. İlk satır header: `id,title,type,score,publishedAt`. RFC 4180 escaping uygulanıyor (virgül, tırnak, satır sonu içeren alanlar çift tırnak ile sarılıyor). `StreamingResponseBody` ile sabit bellek kullanımı.
+
+**JSON** — `Content-Type: application/json; charset=UTF-8`, mevcut `SearchResponse.data[]` şemasıyla aynı yapıda JSON array.
+
+`limit` belirtilmezse varsayılan 100; `export.search.max-rows` (varsayılan 1000) aşılırsa HTTP 400 `INVALID_QUERY` envelope'u dönüyor.
+
+Dashboard'da (`/dashboard`) iki "İndir" linki mevcut — CSV ve JSON — aktif `sort` ve `type` parametrelerini koruyarak, keyword yoksa `q=*` placeholder kullanarak.
+
+### Admin kimlik doğrulama — `X-Admin-Token`
+
+`/api/v1/admin/*` altındaki tüm endpoint'ler `AdminAuthFilter` (`infrastructure/admin/`) ile korunuyor. İstek header'ında `X-Admin-Token` değeri `ADMIN_API_TOKEN` env değişkeniyle eşleşmeli.
+
+- Eşleşmezse → HTTP 401 `UNAUTHORIZED` standart hata envelope'u.
+- Karşılaştırma `MessageDigest.isEqual` ile yapılıyor (timing attack koruması).
+- `admin.auth.token` boşsa admin yüzeyi devre dışı kalıyor (geliştirme ortamı kolaylığı).
+- Token `SecretRedactingPropertySource` tarafından loglardan otomatik maskeleniyor.
+
+Neden Spring Security değil: admin yüzeyi küçük (iki endpoint), statik token yeterli. İleride JWT'ye geçiş mevcut API'yi bozmadan yapılabilir.
+
+## 7) Konfigürasyon
 
 Default değerler `src/main/resources/application.yaml`'de, her tunable değer environment variable ile override edilebilir (Spring relaxed binding). `local` profili (`application-local.yaml`) developer için localhost defaultlarını veriyor.
 
@@ -278,7 +417,7 @@ Bunlar git'e commit edilmiyor — `.env` (gitignore'da) veya CI secret store kul
 
 İsteğe bağlı tunable'lar README'deki tabloda — TTL, sync interval, rate limit window, vs. Hepsi `@ConfigurationProperties` sınıfları ile bind ediliyor (`infrastructure/config/`).
 
-## 7) Test stratejisi
+## 8) Test stratejisi
 
 Test class isim soneki Maven plugin'e gidiş yolunu belirliyor:
 
@@ -298,7 +437,7 @@ Critical property test'ler:
 - Failure isolation (`ContentAggregatorPropertyTest`) — random N×M provider/item matrisi, her valid item upsert ediliyor mu, hiçbir exception escape ediyor mu.
 - Rate limit transition, request-id MDC propagation, sanitization, vs.
 
-## 8) Build ve çalıştırma
+## 9) Build ve çalıştırma
 
 ```cmd
 :: Hızlı build (testleri atla)

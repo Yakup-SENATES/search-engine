@@ -209,6 +209,31 @@
             background: #6d28d9;
         }
 
+        .download-links {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .download-links__label {
+            font-size: 0.85rem;
+            color: #5f6368;
+        }
+
+        .download-links__link {
+            font-size: 0.85rem;
+            color: #1d4ed8;
+            text-decoration: none;
+            padding: 0.2rem 0.5rem;
+            border: 1px solid #1d4ed8;
+            border-radius: 4px;
+        }
+
+        .download-links__link:hover {
+            background: #eef2ff;
+        }
+
         .empty {
             margin-top: 1rem;
             color: #5f6368;
@@ -279,6 +304,16 @@
         <span th:text="${activeSort}">score</span>
         <span class="summary__hint"> &middot; click any column header to re-sort</span>
     </p>
+
+    <div class="download-links" data-testid="download-links">
+        <span class="download-links__label">Download:</span>
+        <a th:href="@{/api/v1/search.csv(q='*', sort=${activeSort}, type=${activeType})}"
+           class="download-links__link"
+           data-testid="download-csv">CSV</a>
+        <a th:href="@{/api/v1/search.json(q='*', sort=${activeSort}, type=${activeType})}"
+           class="download-links__link"
+           data-testid="download-json">JSON</a>
+    </div>
 
     <!--
         Always render the table headers so REQ 10.8 can satisfy "render the
